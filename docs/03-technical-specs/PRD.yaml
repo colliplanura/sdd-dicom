@@ -805,7 +805,7 @@ glossary:
   NIfTI: |
     Neuroimaging Informatics Technology Initiative. Formato simples para
     imagens neuroimagem, popular em pesquisa. Versões: NIfTI-1 (.nii) e 
-    NIfTI-2 (.nii). Com compressão: .nii.gz
+    NIfTI-2 (.nii.gz). Com compressão: .nii.gz
   
   BIDS: |
     Brain Imaging Data Structure. Padrão aberto para organização de dados

@@ -1,0 +1,878 @@
+---
+# ═════════════════════════════════════════════════════════════════════════════
+# SDD-DICOM: Especificação de Desenvolvimento - DICOM to NIfTI Conversion
+# ═════════════════════════════════════════════════════════════════════════════
+# Documento: Product Requirements Document (PRD)
+# Data: Fevereiro 2026
+# Metodologia: Spec Development Driven (SDD)
+# Status: COLETA DE DADOS E CONHECIMENTOS
+# ═════════════════════════════════════════════════════════════════════════════
+
+## 1. VISÃO GERAL DO PROJETO
+## ═════════════════════════════════════════════════════════════════════════════
+
+project_name: "SDD-DICOM - Sistema Automático de Conversão DICOM para NIfTI"
+project_description: |
+  Sistema de automação para conversão de exames de tomografia em formato DICOM 
+  para o formato NIfTI para análise em modelos de deep learning. O sistema deve:
+  - Baixar arquivos DICOMDIR do Google Drive
+  - Converter para formato NIfTI (.nii.gz)
+  - Fazer upload dos resultados para Google Drive
+  - Processar grandes volumes de dados em paralelo
+  - Registrar todos os processos com logging detalhado
+
+target_users:
+  - Pesquisadores do Instituto IDOR
+  - Doutorando (Medicina/Doutorado IDOR)
+  - Analistas de Deep Learning
+
+project_scope: |
+  Fase 1: Coleta de conhecimentos e pesquisa (ATUAL)
+  Fase 2: Arquitetura e design
+  Fase 3: Desenvolvimento da pipeline
+  Fase 4: Testes e validação
+  Fase 5: Deploy e documentação
+
+## 2. REQUISITOS FUNCIONAIS
+## ═════════════════════════════════════════════════════════════════════════════
+
+functional_requirements:
+  
+  FR-001: "Autenticação com Google Drive"
+    description: |
+      O sistema deve autenticar-se com segurança no Google Drive usando OAuth 2.0
+    acceptance_criteria:
+      - Suportar autenticação via credentials.json
+      - Gerenciar tokens de refresh automaticamente
+      - Armazenar credenciais de forma segura (variáveis de ambiente)
+      - Tratamento robusto de erros de autenticação
+    technical_notes:
+      - Usar google-api-python-client
+      - Implementar retry com exponential backoff
+      - Rate limiting de 5-10 requisições/segundo
+
+  FR-002: "Descoberta e Listagem de Arquivos DICOM"
+    description: |
+      Identificar e listar todos os arquivos DICOM do path especificado
+    acceptance_criteria:
+      - Localizar pasta "Medicina/Doutorado IDOR/Exames/DICOM" no Drive
+      - Listar recursivamente todos os arquivos .dcm e DICOMDIR
+      - Filtrar apenas arquivos válidos
+      - Retornar metadata (tamanho, data modificação)
+    technical_notes:
+      - Usar query parameters do Google Drive API
+      - Implementar cache com TTL de 24h
+      - Considerar suporte a DICOMDIR (arquivos de índice DICOM)
+
+  FR-003: "Download de Arquivos DICOM"
+    description: |
+      Baixar arquivos DICOM do Google Drive para processamento local
+    acceptance_criteria:
+      - Suportar download paralelo (5-10 workers)
+      - Retomar downloads interrompidos
+      - Validar integridade com checksums
+      - Armazenar em diretório temporário gerenciado
+    technical_notes:
+      - Implementar streaming para economizar memória
+      - Rate limiting respeitando limites do Google Drive
+      - Limpeza automática de arquivos temporários
+      - Considerar cache para múltiplas conversões
+
+  FR-004: "Conversão DICOM para NIfTI"
+    description: |
+      Converter série DICOM para formato NIfTI comprimido (.nii.gz)
+    acceptance_criteria:
+      - Suportar múltiplas modalidades (CT, MRI, etc)
+      - Preservar metadados DICOM em sidecar JSON (BIDS)
+      - Gerar logs de conversão com detalhes
+      - Tratar erros de conversão graciosamente
+    technical_notes:
+      - Opção 1 (Recomendada): dcm2niix via CLI
+      - Opção 2: nibabel + pydicom
+      - Opção 3: SimpleITK
+      - Usar processamento paralelo (multiprocessing)
+
+  FR-005: "Upload de Arquivos NIfTI"
+    description: |
+      Fazer upload dos arquivos NIfTI convertidos para Google Drive
+    acceptance_criteria:
+      - Estrutura de pastas: Medicina/Doutorado IDOR/Exames/NifTI
+      - Manter hierarquia de subdiretórios
+      - Suportar upload paralelo
+      - Validar integridade pós-upload
+    technical_notes:
+      - Implementar resumable uploads para arquivos grandes
+      - Rate limiting
+      - Retry automático com backoff exponencial
+
+  FR-006: "Processamento em Lote (Batch Processing)"
+    description: |
+      Processar múltiplos exames sequencialmente ou em paralelo
+    acceptance_criteria:
+      - Suportar processamento de centenas de exames
+      - Monitorar progresso em tempo real
+      - Permitir pausa/retomada
+      - Relatório de sucesso/falha por exame
+    technical_notes:
+      - Usar ThreadPoolExecutor para I/O (Google Drive)
+      - Usar ProcessPoolExecutor para CPU (conversão)
+      - Considerar Celery para distribuição futura
+      - Implementar queue com priorização
+
+  FR-007: "Logging e Monitoramento"
+    description: |
+      Registrar todas as operações com detalhes para debugging
+    acceptance_criteria:
+      - Log em arquivo + console
+      - Suportar múltiplos níveis (DEBUG, INFO, WARNING, ERROR)
+      - Rotação automática de logs
+      - Compressão de logs antigos
+      - Logs estruturados em JSON (opcional)
+    technical_notes:
+      - Usar loguru (10x mais rápido que logging padrão)
+      - Estrutura: timestamp | level | module | message
+      - Retenção: 30 dias de logs
+
+  FR-008: "Tratamento de Erros e Recuperação"
+    description: |
+      Recuperação automática de falhas temporárias
+    acceptance_criteria:
+      - Retry automático com backoff exponencial
+      - Diferenciação entre erros permanentes e temporários
+      - Relatório detalhado de erros
+      - Graceful degradation
+    technical_notes:
+      - Implementar circuit breaker para Google Drive
+      - Máximo de 3 retries por operação
+      - Timeout configurável
+
+  FR-009: "Validação de Dados"
+    description: |
+      Validar integridade e correção dos dados em cada etapa
+    acceptance_criteria:
+      - Validar arquivos DICOM antes de converter
+      - Verificar checksums pós-transferência
+      - Validar estrutura de NIfTI gerado
+      - Alertar sobre anomalias
+    technical_notes:
+      - Usar pydicom para validação DICOM
+      - Verificar magic numbers de arquivos
+      - Considerar validação DICOM com dcm2niix
+
+## 3. REQUISITOS NÃO-FUNCIONAIS
+## ═════════════════════════════════════════════════════════════════════════════
+
+non_functional_requirements:
+  
+  NFR-001: "Performance"
+    metrics:
+      throughput: "10-50 arquivos/segundo com 5 workers"
+      latency: "< 2 horas para 1000 arquivos de 10MB"
+      memory_usage: "< 2GB RAM para processamento paralelo"
+    optimization_strategies:
+      - Processamento paralelo (ThreadPoolExecutor)
+      - Cache de metadados DICOM
+      - Streaming para downloads grandes
+      - Compressão paralela (pigz)
+    references:
+      - GitHub: dcm2niix benchmarks
+      - GitHub: HeuDiconv performance
+
+  NFR-002: "Escalabilidade"
+    requirements:
+      - Suportar > 10,000 arquivos
+      - Preparado para distribuição futura (Celery, Dask)
+      - Arquitectura modular e extensível
+    future_considerations:
+      - AWS Lambda para serverless
+      - Kubernetes para orquestração
+      - Multi-machine processing
+
+  NFR-003: "Confiabilidade"
+    targets:
+      uptime: "99.9% durante processamento"
+      failure_recovery: "Recuperação automática de 95% dos erros temporários"
+      data_integrity: "100% dos dados validados"
+    mechanisms:
+      - Checksums em todas as transferências
+      - Logging completo para auditoria
+      - Backup automático de logs
+
+  NFR-004: "Segurança"
+    requirements:
+      - Credenciais em variáveis de ambiente
+      - Sem dados sensíveis em logs
+      - Criptografia de dados em trânsito (HTTPS)
+      - Acesso restrito por permissões Google Drive
+    implementation:
+      - Usar google-auth com service account
+      - Env files (.env) nunca comitados
+      - Validação de entrada
+
+  NFR-005: "Manutenibilidade"
+    requirements:
+      - Código bem documentado
+      - Testes unitários
+      - CI/CD pipeline
+      - Versionamento semântico
+    standards:
+      - PEP 8 para Python
+      - Type hints para IDE support
+      - Docstrings em todas as funções
+
+## 4. STACK TECNOLÓGICO RECOMENDADO
+## ═════════════════════════════════════════════════════════════════════════════
+
+technology_stack:
+  
+  language: "Python 3.9+"
+  rationale: "Ecossistema maduro para neuroimagem, suporte excelente para DICOM"
+  
+  core_libraries:
+    dicom_conversion:
+      primary: "dcm2niix"
+      type: "Command-line tool (C++)"
+      url: "https://github.com/rordenlab/dcm2niix"
+      stars: "1100+"
+      pros:
+        - "Padrão ouro em pesquisa neuroimagem"
+        - "Performance superior (código C++)"
+        - "Suporte robusto para múltiplas manufatoras"
+        - "Geração BIDS-compliant sidecars JSON"
+      cons:
+        - "Requer instalação separada"
+        - "Menos flexível que bibliotecas Python"
+      when_to_use: "Para conversão em produção (recomendado)"
+      installation:
+        macos: "brew install dcm2niix"
+        linux: "apt-get install dcm2niix"
+        windows: "Download from GitHub releases"
+        python_wrapper: "pip install dcm2niix"
+      cli_example: "dcm2niix -z y -f %p_%t_%s -o /output /input"
+
+    dicom_alternatives:
+      option2:
+        name: "nibabel + pydicom"
+        stars: "500+"
+        type: "Python libraries"
+        pros:
+          - "Controle fino sobre conversão"
+          - "Fácil integração Python"
+          - "Suporte DICOMDIR nativo"
+        cons:
+          - "Slower que dcm2niix"
+          - "Menos robusto para casos edge"
+      option3:
+        name: "SimpleITK"
+        stars: "500+"
+        type: "Python binding C++"
+        pros:
+          - "Ótimo para processamento de imagens"
+          - "Performance boa"
+          - "Multi-plataforma"
+        cons:
+          - "Menos específico para DICOM→NIfTI"
+
+  google_drive_api:
+    library: "google-api-python-client"
+    authentication: "OAuth 2.0"
+    url: "https://developers.google.com/drive/api"
+    alternatives:
+      option2:
+        name: "pydrive2"
+        pros: "Interface mais simples"
+        cons: "Menos controle fino"
+      option3:
+        name: "google-drive-python"
+        pros: "Abstração mais alta"
+        cons: "Menos documentado"
+    
+    rate_limiting:
+      limit: "5-10 requests/second"
+      strategy: "Exponential backoff com jitter"
+      retry_policy: "3 retries máximo"
+      references:
+        - "Google API Rate Limiting"
+        - "GitHub: heudiconv Google Drive integration"
+
+  parallel_processing:
+    io_bound:
+      library: "concurrent.futures.ThreadPoolExecutor"
+      workers: "5-10"
+      use_case: "Download/upload Google Drive"
+      rationale: "I/O-bound, GIL não é problema"
+    cpu_bound:
+      library: "concurrent.futures.ProcessPoolExecutor"
+      workers: "CPU count - 2"
+      use_case: "Conversão DICOM"
+      rationale: "CPU-bound, precisa evitar GIL"
+    async:
+      library: "asyncio"
+      when_to_use: "Muitos I/O concorrentes (futura escala)"
+
+  logging:
+    library: "loguru"
+    rationale: "10x mais rápido que logging padrão, syntax simples"
+    configuration:
+      format: "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function} | {message}"
+      rotation: "10MB"
+      retention: "30 days"
+      compression: "zip"
+      json_output: "Opcional para integração ELK"
+    alternatives:
+      - "logging (built-in, mais verboso)"
+      - "structlog (para structured logging)"
+
+  task_queue:
+    current: "ThreadPoolExecutor / ProcessPoolExecutor"
+    future: "Celery + Redis"
+    when_needed: "Quando escalar para múltiplas máquinas"
+    
+  testing:
+    framework: "pytest"
+    coverage_tool: "pytest-cov"
+    target_coverage: "> 80%"
+    
+  environment:
+    package_manager: "pip"
+    dependency_file: "requirements.txt"
+    virtual_env: "venv"
+    python_version: "3.9+ (3.11+ recomendado)"
+
+## 5. ARQUITETURA DE ALTO NÍVEL
+## ═════════════════════════════════════════════════════════════════════════════
+
+architecture:
+  
+  design_pattern: "Pipeline Architecture"
+  
+  layers:
+    data_layer:
+      responsibility: "Acesso a Google Drive e sistema de arquivos"
+      components:
+        - "GoogleDriveClient"
+        - "LocalFileManager"
+        - "CacheManager"
+    
+    processing_layer:
+      responsibility: "Lógica de conversão e transformação"
+      components:
+        - "DICOMToNIfTIConverter"
+        - "ValidationEngine"
+        - "MetadataExtractor"
+    
+    orchestration_layer:
+      responsibility: "Coordenação do workflow"
+      components:
+        - "PipelineOrchestrator"
+        - "TaskQueue"
+        - "ErrorHandler"
+    
+    monitoring_layer:
+      responsibility: "Logging e rastreamento"
+      components:
+        - "Logger"
+        - "ProgressTracker"
+        - "HealthMonitor"
+
+  workflows:
+    
+    main_pipeline:
+      steps:
+        1: "Authenticate with Google Drive"
+        2: "Discover DICOM files in source folder"
+        3: "Create local processing queue"
+        4: "For each DICOM series:"
+          4a: "Download DICOM files"
+          4b: "Validate DICOM integrity"
+          4c: "Convert to NIfTI"
+          4d: "Validate NIfTI output"
+          4e: "Upload to Google Drive"
+          4f: "Cleanup temporary files"
+        5: "Generate final report"
+      
+      parallel_strategy:
+        - "Download fase: ThreadPoolExecutor (5 workers)"
+        - "Conversion fase: ProcessPoolExecutor (CPU count - 2)"
+        - "Upload fase: ThreadPoolExecutor (3 workers)"
+        - "Stages podem sobreposição com pipelining"
+
+## 6. FLUXO DE DADOS
+## ═════════════════════════════════════════════════════════════════════════════
+
+data_flow:
+  
+  input:
+    source: "Google Drive"
+    path: "Medicina/Doutorado IDOR/Exames/DICOM"
+    file_types:
+      - ".dcm (individual DICOM files)"
+      - "DICOMDIR (index files)"
+    expected_structure: |
+      DICOM/
+      ├── Patient_001/
+      │   ├── Study_001/
+      │   │   ├── Series_001/
+      │   │   │   ├── 001.dcm
+      │   │   │   ├── 002.dcm
+      │   │   │   └── ...
+      │   │   └── Series_002/
+      │   └── Study_002/
+      ├── Patient_002/
+      └── ...
+    size_estimation: "10-100 GB+ (centenas de exames)"
+    frequency: "Processamento em lote, não contínuo"
+
+  processing:
+    stage_1_discovery:
+      input: "Google Drive folder path"
+      output: "List of DICOM series with metadata"
+      time_complexity: "O(n) onde n = número de arquivos"
+    
+    stage_2_download:
+      input: "List of DICOM series"
+      output: "Local DICOM files in temp directory"
+      parallelization: "ThreadPoolExecutor (5 workers)"
+      estimated_time: "~2-5 min por GB"
+    
+    stage_3_conversion:
+      input: "Local DICOM series directory"
+      output: "NIfTI file (.nii.gz) + metadata JSON"
+      tool: "dcm2niix"
+      parallelization: "ProcessPoolExecutor (N-2 workers)"
+      estimated_time: "~1-5 min por exame"
+      output_example: |
+        output/
+        ├── patient_001_series_001.nii.gz
+        ├── patient_001_series_001.json
+        └── patient_001_series_001.bvec (se DWI)
+    
+    stage_4_validation:
+      input: "NIfTI files"
+      output: "Validation report + pass/fail status"
+      checks:
+        - "Magic number validation"
+        - "Metadata consistency"
+        - "Data shape integrity"
+    
+    stage_5_upload:
+      input: "Validated NIfTI files"
+      output: "Files uploaded to Google Drive"
+      parallelization: "ThreadPoolExecutor (3-5 workers)"
+      destination: "Medicina/Doutorado IDOR/Exames/NifTI"
+      estimated_time: "~2-5 min por GB"
+
+  output:
+    destination: "Google Drive"
+    path: "Medicina/Doutorado IDOR/Exames/NifTI"
+    file_types:
+      - ".nii.gz (compressed NIfTI volumes)"
+      - ".json (BIDS metadata sidecars)"
+      - ".bvec (diffusion vectors if applicable)"
+    structure: |
+      NifTI/
+      ├── patient_001_study_001_series_001.nii.gz
+      ├── patient_001_study_001_series_001.json
+      ├── patient_002_study_001_series_001.nii.gz
+      ├── patient_002_study_001_series_001.json
+      └── ...
+    total_size: "Similar à entrada (DICOM é ligeiramente maior)"
+
+## 7. CONSIDERAÇÕES TÉCNICAS ESPECÍFICAS
+## ═════════════════════════════════════════════════════════════════════════════
+
+technical_considerations:
+
+  dicomdir_handling:
+    description: "DICOMDIR é um arquivo especial que indexa todos os DICOMs"
+    approach: |
+      1. Detectar se DICOMDIR está presente
+      2. Usar pydicom para parsear estrutura
+      3. Construir lista de séries com base no índice
+      4. Validar integridade das referências
+    references:
+      - "DICOM standard Part 10 (Media Storage and File Format)"
+      - "PyDICOM DICOMDIR documentation"
+      - "dcm2niix DICOMDIR handling"
+
+  multi_modality_support:
+    description: "Suportar diferentes tipos de exames"
+    supported_modalities:
+      - "CT (Computed Tomography)"
+      - "MRI (Magnetic Resonance Imaging)"
+      - "PT (PET - Positron Emission Tomography)"
+      - "US (Ultrasound)"
+      - "Other standard DICOM formats"
+    handling:
+      - "Auto-detect via DICOM header"
+      - "dcm2niix handles vendor-specific formats"
+      - "Logging de modalidade em metadados"
+
+  vendor_specific_formats:
+    description: "Diferentes fabricantes de equipamentos"
+    vendors_tested:
+      - "Siemens"
+      - "Philips"
+      - "GE Healthcare"
+      - "Canon (Toshiba)"
+    compatibility:
+      - "dcm2niix suporta todos os vendors principais"
+      - "Some edge cases may require fallback"
+
+  memory_optimization:
+    strategies:
+      1: "Streaming downloads para economizar RAM"
+      2: "Chunked processing de séries grandes"
+      3: "Limpeza agressiva de temporários"
+      4: "Monitoramento de uso de memória"
+    limits:
+      max_memory_usage: "2GB RAM para pipeline paralela"
+      warning_threshold: "1.5GB"
+      error_threshold: "2GB"
+
+  error_scenarios:
+    corrupted_dicom:
+      likelihood: "Low-Medium"
+      handling: "Log e skip, continue com próximo"
+      strategy: "dcm2niix + try-catch"
+    
+    incomplete_series:
+      likelihood: "Medium"
+      handling: "Tentar com slices disponíveis, log warning"
+      strategy: "Validação parcial"
+    
+    network_timeout:
+      likelihood: "Medium"
+      handling: "Retry automático com backoff"
+      max_retries: 3
+    
+    disk_full:
+      likelihood: "Low"
+      handling: "Erro fatal, limpeza emergency, notificação"
+      strategy: "Check available space antes de download"
+    
+    authentication_failure:
+      likelihood: "Low"
+      handling: "Parar pipeline, solicitar re-auth"
+      strategy: "Token refresh automático"
+
+  bids_compliance:
+    description: "Aderir ao BIDS (Brain Imaging Data Structure)"
+    benefits:
+      - "Padronização para compatibilidade"
+      - "Melhor documentação"
+      - "Suporte de ferramentas BIDS"
+    implementation:
+      - "Usar flags --bids de dcm2niix"
+      - "Gerar sidecars .json obrigatórios"
+      - "Validar com bids-validator (futuro)"
+    references:
+      - "BIDS specification: https://bids-specification.readthedocs.io"
+      - "dcm2niix BIDS output"
+
+## 8. PLANO DE IMPLEMENTAÇÃO
+## ═════════════════════════════════════════════════════════════════════════════
+
+implementation_plan:
+  
+  phase_1_research_and_poc:
+    duration: "2-3 semanas"
+    status: "CURRENT"
+    activities:
+      - "✅ Pesquisa de ferramentas (concluído)"
+      - "✅ Análise de alternativas (concluído)"
+      - "⏳ Prototipagem com dcm2niix"
+      - "⏳ Teste integração Google Drive"
+      - "⏳ Performance benchmarking"
+    deliverables:
+      - "Este PRD completo"
+      - "Protótipo de conversão DICOM→NIfTI"
+      - "Prototipo Google Drive API integration"
+      - "Performance baseline"
+
+  phase_2_architecture_design:
+    duration: "1-2 semanas"
+    activities:
+      - "Design detalhado da arquitetura"
+      - "Diagrama de fluxo de dados"
+      - "Design de banco de dados (if needed)"
+      - "Definição de APIs internas"
+      - "Design de error handling"
+    deliverables:
+      - "Diagramas de arquitetura"
+      - "Especificações de interface"
+      - "Database schema (if needed)"
+
+  phase_3_core_development:
+    duration: "4-6 semanas"
+    modules:
+      module_1: "Google Drive Client"
+        estimated_effort: "1-2 semanas"
+      module_2: "DICOM Converter Wrapper"
+        estimated_effort: "1 semana"
+      module_3: "Pipeline Orchestrator"
+        estimated_effort: "2 semanas"
+      module_4: "Error Handler & Retry Logic"
+        estimated_effort: "1 semana"
+      module_5: "Logging & Monitoring"
+        estimated_effort: "1 semana"
+
+  phase_4_testing_and_validation:
+    duration: "2-3 semanas"
+    test_types:
+      - "Unit tests (todas as funções)"
+      - "Integration tests (módulos)"
+      - "End-to-end tests (pipeline completa)"
+      - "Performance tests (benchmarking)"
+      - "Error scenario tests"
+    coverage_target: "> 80%"
+    test_data: "Amostra de DICOM real + sintético"
+
+  phase_5_deployment_and_docs:
+    duration: "1-2 semanas"
+    activities:
+      - "Documentação de usuário"
+      - "Documentação técnica"
+      - "Setup scripts"
+      - "CI/CD pipeline"
+      - "Monitoramento em produção"
+      - "Backup strategy"
+
+## 9. MÉTRICAS DE SUCESSO
+## ═════════════════════════════════════════════════════════════════════════════
+
+success_metrics:
+  
+  functional_correctness:
+    metric: "Taxa de sucesso de conversão"
+    target: "> 99%"
+    measurement: "Arquivos convertidos com sucesso / Total de arquivos"
+    
+  performance:
+    metric: "Throughput"
+    target: "> 10 arquivos/segundo"
+    measurement: "Arquivos processados por segundo com 5-10 workers"
+    
+    metric: "End-to-end latency"
+    target: "< 3 horas para 1000 arquivos"
+    measurement: "Tempo total da pipeline"
+    
+    metric: "Memory efficiency"
+    target: "< 2GB RAM"
+    measurement: "Peak memory during parallel processing"
+
+  reliability:
+    metric: "Automatic error recovery"
+    target: "> 95%"
+    measurement: "Erros recuperados automaticamente / Total de erros"
+    
+    metric: "Data integrity"
+    target: "100%"
+    measurement: "Checksum validation success rate"
+
+  user_satisfaction:
+    metric: "Ease of use"
+    target: "Setup < 15 minutos"
+    measurement: "Feedback do usuário"
+    
+    metric: "Documentation quality"
+    target: "100% de cobertura"
+    measurement: "Toda função documentada com exemplos"
+
+## 10. RISCOS E MITIGAÇÕES
+## ═════════════════════════════════════════════════════════════════════════════
+
+risks:
+  
+  risk_1:
+    id: "DICOM_COMPATIBILITY"
+    description: "Alguns arquivos DICOM podem ter formatos proprietários não suportados"
+    probability: "Medium"
+    impact: "Medium"
+    mitigation:
+      - "Usar dcm2niix que suporta múltiplas manufatoras"
+      - "Implementar fallback para nibabel/SimpleITK"
+      - "Extensive testing com dados reais"
+      - "Logging detalhado de failures"
+
+  risk_2:
+    id: "GOOGLE_DRIVE_LIMITS"
+    description: "Google Drive API tem rate limits"
+    probability: "Low"
+    impact: "High"
+    mitigation:
+      - "Implementar rate limiting proativo (5-10 req/s)"
+      - "Exponential backoff para retries"
+      - "Batch operations quando possível"
+      - "Caching de metadados"
+
+  risk_3:
+    id: "NETWORK_ISSUES"
+    description: "Falhas de conectividade durante transferências grandes"
+    probability: "High"
+    impact: "Medium"
+    mitigation:
+      - "Resumable uploads/downloads"
+      - "Retry automático com backoff"
+      - "Local caching"
+      - "Checksum validation"
+
+  risk_4:
+    id: "STORAGE_LIMITATIONS"
+    description: "Espaço em disco insuficiente para processamento"
+    probability: "Medium"
+    impact: "High"
+    mitigation:
+      - "Pre-flight disk space checks"
+      - "Streaming processing quando possível"
+      - "Agressiva cleanup de temporários"
+      - "Alertas de capacidade"
+
+  risk_5:
+    id: "PERFORMANCE_DEGRADATION"
+    description: "Performance abaixo do esperado com grande volume"
+    probability: "Medium"
+    impact: "Medium"
+    mitigation:
+      - "Performance benchmarking antes de deploy"
+      - "Monitoring de recursos"
+      - "Optimization iterativo"
+      - "Plano de escala (Celery, distribuído)"
+
+## 11. REFERÊNCIAS E RECURSOS
+## ═════════════════════════════════════════════════════════════════════════════
+
+references:
+  
+  official_documentation:
+    - "DICOM Standard Part 10: https://www.dicomstandard.org/"
+    - "NIfTI Format Specification: https://nifti.nimh.nih.gov/"
+    - "BIDS Specification: https://bids-specification.readthedocs.io/"
+    - "Google Drive API: https://developers.google.com/drive/api"
+
+  github_repositories:
+    primary:
+      - "dcm2niix: https://github.com/rordenlab/dcm2niix"
+      - "HeuDiconv: https://github.com/nipy/heudiconv"
+      - "NiBabel: https://github.com/nipy/nibabel"
+      - "PyDICOM: https://github.com/pydicom/pydicom"
+    wrappers_integration:
+      - "pydra-dcm2niix: https://github.com/nipype/pydra-dcm2niix"
+      - "dcm2niixpy: https://github.com/Svdvoort/dcm2niixpy"
+    bids_conversion:
+      - "Dcm2Bids: https://github.com/cbedetti/Dcm2Bids"
+      - "BIDScoin: https://github.com/Donders-Institute/bidscoin"
+
+  python_libraries:
+    dicom_processing:
+      - "pydicom: https://github.com/pydicom/pydicom"
+      - "nibabel: https://github.com/nipy/nibabel"
+      - "SimpleITK: https://github.com/SimpleITK/SimpleITK"
+    google_integration:
+      - "google-api-python-client: https://github.com/googleapis/google-api-python-client"
+      - "google-auth: https://github.com/googleapis/google-auth-library-python"
+    parallel_processing:
+      - "joblib: https://github.com/joblib/joblib"
+      - "concurrent.futures: https://docs.python.org/3/library/concurrent.futures.html"
+    logging:
+      - "loguru: https://github.com/Delgan/loguru"
+      - "structlog: https://github.com/hynek/structlog"
+
+  stack_overflow_tags:
+    - "[python]"
+    - "[dicom]"
+    - "[nifti]"
+    - "[google-drive-api]"
+    - "[parallel-processing]"
+
+  research_papers:
+    - "Li X et al. (2016). The first step for neuroimaging data analysis: DICOM to NIfTI conversion"
+    - "BIDS: Brain Imaging Data Structure"
+
+## 12. GLOSSÁRIO
+## ═════════════════════════════════════════════════════════════════════════════
+
+glossary:
+  
+  DICOM: |
+    Digital Imaging and Communications in Medicine. Padrão internacional
+    para imagens e comunicações médicas. Complexo e altamente estruturado.
+  
+  DICOMDIR: |
+    Arquivo especial DICOM que funciona como índice, referenciando todos
+    os arquivos DICOM de um conjunto. Útil para estruturas multiusuário.
+  
+  NIfTI: |
+    Neuroimaging Informatics Technology Initiative. Formato simples para
+    imagens neuroimagem, popular em pesquisa. Versões: NIfTI-1 (.nii) e 
+    NIfTI-2 (.nii). Com compressão: .nii.gz
+  
+  BIDS: |
+    Brain Imaging Data Structure. Padrão aberto para organização de dados
+    neuroimagem, facilita compartilhamento e análise.
+  
+  Sidecar JSON: |
+    Arquivo JSON acompanhando arquivo de imagem, contém metadados estruturados.
+    Padrão BIDS para documentar parâmetros de aquisição.
+  
+  Transfer Syntax: |
+    Forma como dados DICOM são armazenados (raw, JPEG, JPEG2000, RLE, etc).
+    Diferentes taxa de compressão e perda.
+  
+  Rate Limiting: |
+    Limite de requisições por segundo para APIs. Google Drive: ~10 req/s.
+    Necessário para evitar throttling.
+  
+  Exponential Backoff: |
+    Estratégia de retry aumentando delay (1s, 2s, 4s, 8s...). Previne
+    sobrecarga ao recuperar de falhas temporárias.
+  
+  ThreadPoolExecutor: |
+    Pool de threads Python para paralelização. Bom para I/O-bound, mas
+    limitado por GIL em CPU-bound.
+  
+  ProcessPoolExecutor: |
+    Pool de processos Python para paralelização real. Evita GIL, bom para
+    CPU-bound, mas com overhead de IPC.
+  
+  dcm2niix: |
+    Ferramenta Command-line (C++) para conversão DICOM→NIfTI. Padrão ouro
+    em neuroimagem. Mantida por Chris Rorden.
+  
+  Checksum: |
+    Hash criptográfico (MD5, SHA256) de arquivo para validar integridade
+    durante transferência.
+
+## 13. PRÓXIMOS PASSOS
+## ═════════════════════════════════════════════════════════════════════════════
+
+next_steps:
+  
+  immediate_actions:
+    1: "Revisar e aprovar PRD com stakeholders"
+    2: "Setup de ambiente de desenvolvimento"
+    3: "Instalar e testar dcm2niix localmente"
+    4: "Criar credentials.json para Google Drive API"
+    5: "Estruturar repositório git com scaffold básico"
+
+  dependencies_to_resolve:
+    1: "Acessar dados DICOM reais para testing"
+    2: "Confirmar estrutura de pastas no Google Drive"
+    3: "Definir política de retenção de dados"
+    4: "Avaliar quota de Google Drive disponível"
+
+  decisions_pending:
+    1: "Usar dcm2niix vs nibabel vs SimpleITK?"
+      recommendation: "dcm2niix para produção, nibabel para prototipagem"
+    2: "Implementar cache local?"
+      recommendation: "Sim, TTL 24h para metadados"
+    3: "BIDS compliance obrigatório?"
+      recommendation: "Sim, usar --bids flag de dcm2niix"
+
+---
+# FIM DO DOCUMENTO PRD
+# Gerado: Fevereiro 2026
+# Metodologia: Spec Development Driven (SDD)
+# Status: COLETA DE DADOS CONCLUÍDA
+# Próxima Fase: Arquitetura e Design
+# ═════════════════════════════════════════════════════════════════════════════

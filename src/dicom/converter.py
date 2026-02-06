@@ -41,20 +41,54 @@ class DIOMConverter:
                 timeout=5
             )
             
-            if result.returncode == 0:
-                version = result.stdout.strip()
+            # dcm2niix retorna exit code 3 mesmo com sucesso
+            # Verificamos se encontramos a versão no stdout
+            version_output = (result.stdout + result.stderr).strip()
+            
+            if "dcm2niiX version" in version_output or result.returncode in [0, 3]:
+                # Extrair a versão
+                version = version_output.split('\n')[0] if version_output else "desconhecida"
                 logger.info(f"✓ dcm2niix detectado: {version}")
             else:
-                raise DIOMConversionError(f"dcm2niix retornou erro: {result.stderr}")
+                # Erro real ao executar dcm2niix
+                error_msg = result.stderr.strip() if result.stderr else "sem mensagem de erro"
+                logger.error(f"dcm2niix retornou erro: {error_msg}")
+                raise DIOMConversionError(
+                    f"dcm2niix retornou erro ao verificar versão:\n{error_msg}\n\n"
+                    f"Solução:\n"
+                    f"  macOS:  brew install dcm2niix\n"
+                    f"  Linux:  apt-get install dcm2niix\n"
+                    f"  Docker: Use a imagem oficial com dcm2niix pré-instalado"
+                )
         
         except FileNotFoundError:
             raise DIOMConversionError(
-                f"dcm2niix não encontrado: {self.dcm2niix_path}\n"
-                "Instale com: brew install dcm2niix (macOS) "
-                "ou apt-get install dcm2niix (Linux)"
+                f"❌ dcm2niix não encontrado no PATH\n\n"
+                f"Caminho procurado: {self.dcm2niix_path}\n\n"
+                f"Solução:\n"
+                f"  1. macOS (Homebrew):\n"
+                f"     brew install dcm2niix\n\n"
+                f"  2. Linux (apt):\n"
+                f"     sudo apt-get install dcm2niix\n\n"
+                f"  3. Linux (conda):\n"
+                f"     conda install -c conda-forge dcm2niix\n\n"
+                f"  4. Compilar do código-fonte:\n"
+                f"     https://github.com/rordenlab/dcm2niix\n\n"
+                f"Depois de instalar, reinicie a aplicação."
             )
         except subprocess.TimeoutExpired:
-            raise DIOMConversionError("dcm2niix timeout ao verificar versão")
+            raise DIOMConversionError(
+                f"❌ dcm2niix não respondeu após 5 segundos\n"
+                f"Isso pode indicar:\n"
+                f"  - Caminho incorreto: {self.dcm2niix_path}\n"
+                f"  - Permissões insuficientes\n"
+                f"  - Sistema muito lento"
+            )
+        except Exception as e:
+            raise DIOMConversionError(
+                f"❌ Erro inesperado ao verificar dcm2niix:\n{e}\n"
+                f"Instale dcm2niix: brew install dcm2niix (macOS)"
+            )
     
     def convert(
         self,

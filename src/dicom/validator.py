@@ -6,6 +6,7 @@ from typing import Tuple
 from loguru import logger
 
 from ..core.exceptions import ValidationError
+from .file_detector import DICOMFileDetector
 
 
 class DIOMValidator:
@@ -20,6 +21,9 @@ class DIOMValidator:
         - Magic number (128 bytes + "DICM")
         - Integridade do arquivo
         
+        Nota: Não depende de extensão, funciona com 
+        arquivos DICOM sem a extensão .dcm
+        
         Args:
             file_path: Caminho do arquivo
         
@@ -29,23 +33,13 @@ class DIOMValidator:
         try:
             file_path = Path(file_path)
             
-            # Verificar tamanho mínimo
-            if file_path.stat().st_size < 132:
-                logger.warning(f"Arquivo muito pequeno: {file_path}")
-                return False
-            
-            # Verificar magic number
-            with open(file_path, 'rb') as f:
-                # DICOM magic number está em 128 bytes
-                f.seek(128)
-                magic = f.read(4)
-            
-            is_valid = magic == b'DICM'
+            # Usar detector robusto de DICOM
+            is_valid = DICOMFileDetector.is_dicom_file(file_path)
             
             if is_valid:
                 logger.debug(f"✓ DICOM válido: {file_path.name}")
             else:
-                logger.warning(f"Magic number inválido: {file_path.name}")
+                logger.warning(f"Magic number inválido ou arquivo muito pequeno: {file_path.name}")
             
             return is_valid
         

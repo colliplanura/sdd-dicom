@@ -77,7 +77,8 @@ def list_dicom_files(client: GoogleDriveClient, max_files: int = 10):
         logger.info(f"\nEncontrados {len(files)} arquivos:\n")
         
         for i, f in enumerate(files, 1):
-            size_mb = f.get('size', 0) / (1024 * 1024)
+            size_bytes = int(f.get('size', 0) or 0)  # Converter para int
+            size_mb = size_bytes / (1024 * 1024)
             logger.info(f"  {i}. {f['name']} ({size_mb:.1f} MB)")
         
         return files
@@ -108,7 +109,7 @@ def process_dicom_files(client: GoogleDriveClient, max_files: int = 10):
                 file_id=f['id'],
                 file_name=f['name'],
                 patient_id=f"P{i:03d}",
-                size_mb=f.get('size', 0) / (1024 * 1024)
+                size_mb=int(f.get('size', 0) or 0) / (1024 * 1024)  # Converter para int
             )
             for i, f in enumerate(files, 1)
         ]

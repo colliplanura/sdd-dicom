@@ -64,16 +64,18 @@ class GoogleDriveClient:
         folder_id: Optional[str] = None,
         folder_name: Optional[str] = None,
         recursive: bool = True,
-        max_results: int = 1000
+        max_results: int = 1000,
+        filter_dicom: bool = True
     ) -> List[Dict]:
         """
-        Listar arquivos em pasta
+        Listar arquivos em pasta (recursivamente se configurado)
         
         Args:
             folder_id: ID da pasta (se conhecido)
             folder_name: Nome da pasta (se ID não conhecido)
-            recursive: Listar recursivamente
+            recursive: Listar recursivamente em subpastas
             max_results: Máximo de resultados
+            filter_dicom: Filtrar apenas arquivos DICOM (magic number)
         
         Returns:
             Lista de arquivos com metadados
@@ -81,31 +83,33 @@ class GoogleDriveClient:
         try:
             # Se não tem folder_id, procurar pelo nome
             if not folder_id and folder_name:
+                logger.info(f"Procurando pasta: {folder_name}")
                 folder_id = self._find_folder_by_name(folder_name)
                 if not folder_id:
-                    raise GoogleDriveError(f"Pasta não encontrada: {folder_name}")
+                    error_msg = (
+                        f"Pasta não encontrada: {folder_name}\n"
+                        f"Verifique:\n"
+                        f"  1. Se o caminho está correto\n"
+                        f"  2. Se a pasta existe no Google Drive\n"
+                        f"  3. Se você tem permissão de acesso\n"
+                        f"  4. Espaços/caracteres especiais no nome"
+                    )
+                    logger.error(error_msg)
+                    raise GoogleDriveError(error_msg)
             
             files = []
-            query = f"'{folder_id}' in parents and trashed=false"
             
-            logger.info(f"Listando arquivos da pasta: {folder_id}")
+            if recursive:
+                # Busca recursiva em subpastas
+                logger.info(f"Listando recursivamente arquivos da pasta: {folder_id}")
+                files = self._list_files_recursive(folder_id, max_results)
+            else:
+                # Busca apenas na pasta especificada
+                logger.info(f"Listando arquivos da pasta: {folder_id}")
+                files = self._list_files_in_folder(folder_id, max_results)
             
-            page_token = None
-            while True:
-                request = self.service.files().list(
-                    q=query,
-                    spaces='drive',
-                    pageSize=100,
-                    pageToken=page_token,
-                    fields='files(id, name, size, mimeType, modifiedTime, parents)',
-                )
-                
-                results = self._execute_with_rate_limit(request)
-                files.extend(results.get('files', []))
-                
-                page_token = results.get('nextPageToken')
-                if not page_token or len(files) >= max_results:
-                    break
+            # Filtrar apenas arquivos (não pastas)
+            files = [f for f in files if f.get('mimeType', '') != 'application/vnd.google-apps.folder']
             
             # Truncar se necessário
             files = files[:max_results]
@@ -116,9 +120,109 @@ class GoogleDriveClient:
         except HttpError as e:
             raise GoogleDriveError(f"Erro ao listar arquivos: {e}")
     
+    def _list_files_in_folder(
+        self,
+        folder_id: str,
+        max_results: int = 1000
+    ) -> List[Dict]:
+        """Listar arquivos apenas na pasta especificada (não recursivo)"""
+        files = []
+        query = f"'{folder_id}' in parents and trashed=false"
+        
+        page_token = None
+        while True:
+            request = self.service.files().list(
+                q=query,
+                spaces='drive',
+                pageSize=100,
+                pageToken=page_token,
+                fields='files(id, name, size, mimeType, modifiedTime, parents)',
+            )
+            
+            results = self._execute_with_rate_limit(request)
+            files.extend(results.get('files', []))
+            
+            page_token = results.get('nextPageToken')
+            if not page_token or len(files) >= max_results:
+                break
+        
+        return files
+    
+    def _list_files_recursive(
+        self,
+        folder_id: str,
+        max_results: int = 1000
+    ) -> List[Dict]:
+        """Listar arquivos recursivamente em subpastas"""
+        all_files = []
+        folders_to_process = [folder_id]
+        processed_folders = set()
+        
+        while folders_to_process and len(all_files) < max_results:
+            current_folder = folders_to_process.pop(0)
+            
+            # Evitar processar pasta duplicada
+            if current_folder in processed_folders:
+                continue
+            processed_folders.add(current_folder)
+            
+            try:
+                query = f"'{current_folder}' in parents and trashed=false"
+                
+                page_token = None
+                while True:
+                    request = self.service.files().list(
+                        q=query,
+                        spaces='drive',
+                        pageSize=100,
+                        pageToken=page_token,
+                        fields='files(id, name, size, mimeType, modifiedTime, parents)',
+                    )
+                    
+                    results = self._execute_with_rate_limit(request)
+                    items = results.get('files', [])
+                    
+                    for item in items:
+                        # Se é pasta, adicionar para processar depois
+                        if item.get('mimeType') == 'application/vnd.google-apps.folder':
+                            if item['id'] not in processed_folders:
+                                folders_to_process.append(item['id'])
+                        else:
+                            # É arquivo, adicionar à lista
+                            all_files.append(item)
+                            if len(all_files) >= max_results:
+                                break
+                    
+                    page_token = results.get('nextPageToken')
+                    if not page_token or len(all_files) >= max_results:
+                        break
+            
+            except HttpError as e:
+                logger.warning(f"Erro ao listar pasta {current_folder}: {e}")
+                continue
+        
+        return all_files[:max_results]
+    
     def _find_folder_by_name(self, folder_name: str) -> Optional[str]:
-        """Encontrar ID de pasta pelo nome"""
+        """
+        Encontrar ID de pasta pelo nome
+        
+        Suporta:
+        - Nome simples: "Exames"
+        - Caminho: "Medicina/Doutorado IDOR/Exames/DICOM"
+        
+        Args:
+            folder_name: Nome da pasta ou caminho completo
+        
+        Returns:
+            ID da pasta ou None se não encontrada
+        """
         try:
+            # Se contém "/", é um caminho aninhado
+            if '/' in folder_name:
+                return self._find_folder_by_path(folder_name)
+            
+            # Busca simples por nome
             query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
             request = self.service.files().list(
                 q=query,
@@ -134,7 +238,80 @@ class GoogleDriveClient:
                 return files[0]['id']
             return None
         
-        except HttpError:
+        except HttpError as e:
+            logger.warning(f"Erro ao buscar pasta '{folder_name}': {e}")
+            return None
+    
+    def _find_folder_by_path(self, path: str) -> Optional[str]:
+        """
+        Encontrar pasta navegando por caminho aninhado
+        
+        Ex: "Medicina/Doutorado IDOR/Exames/DICOM"
+        
+        Args:
+            path: Caminho com pastas separadas por "/"
+        
+        Returns:
+            ID da pasta final ou None se caminho não encontrado
+        """
+        try:
+            parts = [p.strip() for p in path.split('/') if p.strip()]
+            
+            if not parts:
+                logger.warning("Caminho vazio fornecido")
+                return None
+            
+            current_folder_id = None
+            
+            # Navegar por cada parte do caminho
+            for i, part in enumerate(parts):
+                logger.debug(f"Buscando pasta: {part}")
+                
+                if current_folder_id:
+                    # Buscar dentro da pasta atual
+                    query = f"name='{part}' and mimeType='application/vnd.google-apps.folder' and '{current_folder_id}' in parents and trashed=false"
+                else:
+                    # Buscar na raiz
+                    query = f"name='{part}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                
+                request = self.service.files().list(
+                    q=query,
+                    spaces='drive',
+                    pageSize=10,  # Aumentado para lidar com homônimos
+                    fields='files(id, name)',
+                )
+                
+                results = self._execute_with_rate_limit(request)
+                files = results.get('files', [])
+                
+                if not files:
+                    logger.warning(f"Pasta não encontrada: {part}")
+                    logger.warning(f"Caminho procurado até: {'/'.join(parts[:i])}")
+                    return None
+                
+                # Se múltiplas opções, preferir match exato
+                found = None
+                for f in files:
+                    if f['name'] == part:  # Match exato
+                        found = f
+                        break
+                
+                # Se não encontrou match exato, usar primeiro resultado
+                if not found:
+                    found = files[0]
+                    logger.debug(f"Usando aproximação: {found['name']}")
+                
+                current_folder_id = found['id']
+                logger.debug(f"✓ Pasta encontrada: {found['name']} (ID: {current_folder_id})")
+            
+            logger.info(f"✓ Caminho encontrado: {path} → {current_folder_id}")
+            return current_folder_id
+        
+        except HttpError as e:
+            logger.error(f"Erro ao navegar caminho '{path}': {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Erro inesperado ao buscar caminho '{path}': {e}")
             return None
     
     def download_file(
@@ -166,11 +343,11 @@ class GoogleDriveClient:
             logger.info(f"Iniciando download: {file_id} → {output_path}")
             
             with open(output_path, 'wb') as fh:
+                # MediaIoBaseDownload não aceita 'resumable' no construtor
                 downloader = MediaIoBaseDownload(
                     fh,
                     request,
-                    chunksize=chunk_size_mb * 1024 * 1024,
-                    resumable=True
+                    chunksize=chunk_size_mb * 1024 * 1024
                 )
                 
                 done = False

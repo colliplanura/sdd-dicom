@@ -138,7 +138,9 @@ class BatchPipeline:
             futures = {}
             
             for task in tasks:
-                output_path = self.config.TEMP_DIR / f"{task.file_id}.dcm"
+                # Usar nome do arquivo original, sem forçar .dcm
+                # (arquivos DICOM podem não ter extensão)
+                output_path = self.config.TEMP_DIR / task.file_name
                 futures[executor.submit(
                     self._download_file,
                     task.file_id,

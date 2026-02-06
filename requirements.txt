@@ -1,0 +1,87 @@
+# Requirements.txt para o projeto SDD-DICOM
+# Instalar com: pip install -r requirements.txt
+
+# ==================== DEPENDÊNCIAS PRINCIPAIS ====================
+
+# Google Drive Integration
+google-api-python-client==2.70.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.3.0
+google-cloud-storage==2.14.0  # Opcional: para grandes volumes
+
+# Logging
+loguru==0.8.0
+
+# Progress Bars
+tqdm==4.66.2
+
+# DICOM Processing (Opcional)
+pydicom==2.5.3
+
+# ==================== DEPENDÊNCIAS OPCIONAIS ====================
+
+# Processamento paralelo avançado
+celery==5.3.0  # Para fila de tarefas distribuída
+redis==5.0.0   # Backend para Celery
+dask==2024.01.0  # Paralelização alternativa
+
+# Agendamento de tarefas
+apscheduler==3.10.4
+
+# Notificações
+apprise==1.0.0  # Para alertas por email/Slack/Discord
+
+# Utilities
+python-dateutil==2.8.2
+requests==2.31.0
+
+# ==================== DEPENDÊNCIAS DE DESENVOLVIMENTO ====================
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.27.0
+
+# Linting
+flake8==6.1.0
+black==24.1.1
+
+# Type Checking
+mypy==1.8.0
+
+# Documentation
+sphinx==7.2.6
+sphinx-rtd-theme==2.0.0
+
+# ==================== NOTAS ====================
+
+# Core (obrigatório):
+# - google-api-python-client
+# - google-auth-oauthlib
+# - google-auth-httplib2
+# - loguru
+
+# Recomendado para DICOM:
+# - pydicom
+# - tqdm (progress bars)
+
+# Escalabilidade futura:
+# - celery
+# - redis
+# - dask
+
+# ==================== INSTALAÇÃO RÁPIDA ====================
+
+# 1. Apenas essencial:
+#    pip install google-api-python-client google-auth-oauthlib google-auth-httplib2 loguru
+
+# 2. Recomendado:
+#    pip install -r requirements.txt
+
+# 3. Com tudo:
+#    pip install -r requirements.txt
+#    pip install -r requirements-dev.txt
+
+# ==================== PYTHON VERSION ====================
+
+# Requer Python 3.8+
+# Testado com Python 3.8, 3.9, 3.10, 3.11, 3.12

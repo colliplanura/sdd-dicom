@@ -56,7 +56,7 @@ Thumbs.db
 
 ## Configuração Local
 config/credentials.json
-config/tokenz.json
+config/token.json
 temp/
 
 ## OS

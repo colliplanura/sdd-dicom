@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  sdd-dicom:
+    build: .
+    container_name: sdd-dicom-converter
+    
+    environment:
+      - CREDENTIALS_PATH=/app/config/credentials.json
+      - GD_FOLDER=Medicina/Doutorado IDOR/Exames/DICOM
+      - MAX_WORKERS_DL=5
+      - MAX_WORKERS_PROC=6
+      - LOG_LEVEL=INFO
+    
+    volumes:
+      # Montar credenciais
+      - ./config/credentials.json:/app/config/credentials.json:ro
+      # Montar diretórios
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    
+    # Executar a cada dia às 2AM
+    # command: sh -c "while true; do python main.py --process && sleep 86400; done"
+    
+    # Ou usar cron dentro do container
+    # entrypoint: /bin/sh
+    # command: -c "crond -f"
+
+# Exemplo com Celery (para escala futura):
+#
+# services:
+#   redis:
+#     image: redis:7-alpine
+#   
+#   celery-worker:
+#     build: .
+#     command: celery -A src.pipeline.celery worker -l info
+#     depends_on:
+#       - redis

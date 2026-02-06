@@ -1,43 +1,65 @@
 # SDD-DICOM Project
 
-## Arquivos de Documentação Original
-*.md
-
-## Código-fonte
-src/
-main.py
-requirements.txt
-
-## Testes
-tests/
-
-## Configuração
-config/
-.env
-.env.example
-
-## Docker
-Dockerfile
-docker-compose.yml
-
-## Dependências
+## Ambiente Python Virtual
 venv/
-__pycache__/
+.venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
-.pytest_cache/
+.installed.cfg
+*.egg
 
-## Logs e temporários
+## Cache e temporários
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+## Logs
 logs/
-temp/
 *.log
 
-## IDE
+## IDE e Editor
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+## Variáveis de Ambiente
+.env
+.env.local
+.env.*.local
+
+## Configuração Local
+config/credentials.json
+temp/
 
 ## OS
 .DS_Store
+.AppleDouble
+.LSOverride
 Thumbs.db

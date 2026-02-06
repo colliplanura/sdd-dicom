@@ -29,6 +29,7 @@ class ProcessingTask:
     file_name: str
     patient_id: str
     size_mb: float
+    study_info: Optional[Dict] = None  # Se fornecido, é um estudo DICOM, não um arquivo
 
 
 class BatchPipeline:
@@ -99,7 +100,13 @@ class BatchPipeline:
         
         # Download em paralelo (I/O-bound)
         logger.info("[1/5] DOWNLOAD - Iniciando downloads paralelos")
-        downloaded_files = self._download_stage(tasks)
+        
+        # Verificar se há estudos
+        is_study = any(task.study_info for task in tasks)
+        if is_study:
+            downloaded_files = self._download_study_stage_for_tasks(tasks)
+        else:
+            downloaded_files = self._download_stage(tasks)
         
         # Validação DICOM
         logger.info("[2/5] VALIDAÇÃO - Validando arquivos DICOM")
@@ -158,6 +165,41 @@ class BatchPipeline:
                     logger.error(f"✗ Download falhou: {task.file_name} - {e}")
         
         logger.info(f"Download concluído: {len(downloaded)}/{len(tasks)}")
+        return downloaded
+    
+    def _download_study_stage_for_tasks(self, tasks: List[ProcessingTask]) -> List[Dict]:
+        """
+        Estágio 1 (adaptado): Download de estudos DICOM a partir de ProcessingTasks
+        """
+        ensure_directory(self.config.TEMP_DIR)
+        
+        downloaded = []
+        
+        with ThreadPoolExecutor(max_workers=self.config.MAX_WORKERS_DOWNLOAD) as executor:
+            futures = {}
+            
+            for task in tasks:
+                if not task.study_info:
+                    continue
+                    
+                output_dir = self.config.TEMP_DIR / task.file_name
+                futures[executor.submit(
+                    self._download_study,
+                    task.study_info,
+                    output_dir
+                )] = task
+            
+            for future in as_completed(futures):
+                task = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        downloaded.append(result)
+                        logger.info(f"✓ Download Study: {task.file_name}")
+                except Exception as e:
+                    logger.error(f"✗ Download Study falhou: {task.file_name} - {e}")
+        
+        logger.info(f"Download de estudos concluído: {len(downloaded)}/{len(tasks)}")
         return downloaded
     
     def _download_study_stage(self, tasks: List[ProcessingTask], study_infos: List[Dict]) -> List[Dict]:

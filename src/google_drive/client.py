@@ -567,13 +567,21 @@ class GoogleDriveClient:
             logger.info(f"Baixando estudo DICOM: {study_info['name']} → {study_dir}")
             
             # Baixar recursivamente todos os arquivos
-            self._download_folder_recursive(dicom_folder_id, study_dir, chunk_size_mb)
+            files_count = self._download_folder_recursive(dicom_folder_id, study_dir, chunk_size_mb)
             
-            logger.info(f"✓ Estudo baixado: {study_dir}")
-            return study_dir
+            logger.info(f"✓ Estudo baixado: {study_dir} ({files_count} arquivos)")
+            
+            # Validar se baixou algo
+            if files_count > 0:
+                return study_dir
+            else:
+                logger.warning(f"Nenhum arquivo foi baixado para o estudo {study_info['name']}")
+                return study_dir  # Ainda retorna o diretório, mesmo que vazio
         
         except Exception as e:
             logger.error(f"Erro ao baixar estudo: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _download_folder_recursive(
@@ -614,6 +622,7 @@ class GoogleDriveClient:
             ).execute()
             
             items = results.get('files', [])
+            logger.debug(f"Listando pasta {folder_id}: {len(items)} itens encontrados")
             
             for item in items:
                 mime_type = item.get('mimeType', '')
@@ -622,6 +631,7 @@ class GoogleDriveClient:
                     # É uma subpasta, criar e recursivo
                     subfolder = output_dir / item['name']
                     subfolder.mkdir(parents=True, exist_ok=True)
+                    logger.debug(f"Descendo em subpasta: {item['name']}")
                     files_downloaded += self._download_folder_recursive(
                         item['id'],
                         subfolder,
@@ -632,6 +642,7 @@ class GoogleDriveClient:
                     logger.debug(f"Pulando arquivo Google Workspace: {item['name']} ({mime_type})")
                 else:
                     # É um arquivo binário, tentar baixar
+                    logger.debug(f"Baixando arquivo: {item['name']} ({mime_type})")
                     try:
                         file_path = output_dir / item['name']
                         self.download_file(
@@ -640,6 +651,7 @@ class GoogleDriveClient:
                             chunk_size_mb
                         )
                         files_downloaded += 1
+                        logger.debug(f"✓ Baixado: {item['name']}")
                     except Exception as e:
                         logger.warning(f"Erro ao baixar {item['name']}: {e}")
                         # Continua tentando outros arquivos

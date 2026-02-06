@@ -183,12 +183,13 @@ def process_dicom_studies(client: GoogleDriveClient, max_studies: int = 10):
         # Criar tarefas para cada estudo
         tasks = []
         for i, study in enumerate(studies, 1):
-            # Para estudos, usamos o ID da pasta DICOM do estudo
+            # Para estudos, passamos study_info
             task = ProcessingTask(
                 file_id=study['dicom_folder_id'],
                 file_name=study['name'],
                 patient_id=f"P{i:03d}",
-                size_mb=0  # Não aplicável para estudos
+                size_mb=0,  # Não aplicável para estudos
+                study_info=study  # ← Passando informações do estudo
             )
             tasks.append(task)
         

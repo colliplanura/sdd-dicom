@@ -42,9 +42,21 @@ Exemplos de uso:
     )
     
     parser.add_argument(
+        '--list-studies',
+        action='store_true',
+        help='Listar estudos DICOM (abordagem por estudo)'
+    )
+    
+    parser.add_argument(
         '--process',
         action='store_true',
         help='Processar lote de arquivos'
+    )
+    
+    parser.add_argument(
+        '--process-studies',
+        action='store_true',
+        help='Processar estudos DICOM (abordagem por estudo)'
     )
     
     parser.add_argument(
@@ -131,6 +143,72 @@ def process_dicom_files(client: GoogleDriveClient, max_files: int = 10):
         traceback.print_exc()
 
 
+def list_dicom_studies(client: GoogleDriveClient, max_studies: int = 10):
+    """Listar estudos DICOM disponíveis"""
+    try:
+        logger.info(f"Listando até {max_studies} estudos DICOM...")
+        
+        studies = client.list_dicom_studies(
+            folder_name=Config.GOOGLE_DRIVE_FOLDER,
+            max_results=max_studies
+        )
+        
+        logger.info(f"\nEncontrados {len(studies)} estudos:\n")
+        
+        for i, study in enumerate(studies, 1):
+            logger.info(f"  {i}. {study['name']} (ID: {study['study_number']})")
+        
+        return studies
+    
+    except Exception as e:
+        logger.error(f"Erro ao listar estudos: {e}")
+        return []
+
+
+def process_dicom_studies(client: GoogleDriveClient, max_studies: int = 10):
+    """Processar estudos DICOM"""
+    try:
+        # Listar estudos
+        studies = client.list_dicom_studies(
+            folder_name=Config.GOOGLE_DRIVE_FOLDER,
+            max_results=max_studies
+        )
+        
+        if not studies:
+            logger.error("Nenhum estudo encontrado")
+            return
+        
+        logger.info(f"Processando {len(studies)} estudos DICOM...")
+        
+        # Criar tarefas para cada estudo
+        tasks = []
+        for i, study in enumerate(studies, 1):
+            # Para estudos, usamos o ID da pasta DICOM do estudo
+            task = ProcessingTask(
+                file_id=study['dicom_folder_id'],
+                file_name=study['name'],
+                patient_id=f"P{i:03d}",
+                size_mb=0  # Não aplicável para estudos
+            )
+            tasks.append(task)
+        
+        # Criar pipeline
+        pipeline = BatchPipeline(
+            google_drive_client=client,
+            dicom_converter=DIOMConverter()
+        )
+        
+        # Processar
+        results = pipeline.process_batch(tasks)
+        
+        logger.info(f"✓ Processamento de estudos concluído: {len(results)} sucesso")
+    
+    except Exception as e:
+        logger.error(f"Erro no processamento de estudos: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
     """Função principal"""
     args = setup_args()
@@ -154,15 +232,23 @@ def main():
     if args.list:
         list_dicom_files(client, args.max_files)
     
+    elif args.list_studies:
+        list_dicom_studies(client, args.max_files)
+    
     elif args.process:
         process_dicom_files(client, args.max_files)
+    
+    elif args.process_studies:
+        process_dicom_studies(client, args.max_files)
     
     else:
         # Sem argumento, mostrar ajuda
         logger.info("Use --help para ver opções disponíveis")
         logger.info("Exemplos:")
-        logger.info("  python main.py --list          (listar arquivos)")
-        logger.info("  python main.py --process       (processar lote)")
+        logger.info("  python main.py --list               (listar arquivos)")
+        logger.info("  python main.py --list-studies       (listar estudos)")
+        logger.info("  python main.py --process            (processar arquivos)")
+        logger.info("  python main.py --process-studies    (processar estudos)")
 
 
 if __name__ == '__main__':

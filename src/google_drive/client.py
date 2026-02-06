@@ -436,3 +436,215 @@ class GoogleDriveClient:
         
         except HttpError as e:
             raise GoogleDriveError(f"Erro ao obter info: {e}")
+    
+    def list_dicom_studies(
+        self,
+        folder_name: str,
+        max_results: int = 100
+    ) -> List[Dict]:
+        """
+        Listar estudos DICOM (pastas numeradas) em vez de arquivos individuais
+        
+        Estrutura esperada:
+        - Medicina/Doutorado IDOR/Exames/DICOM/
+          - AAA1/
+            - 1/ (estudo)
+              - DICOM/
+                - <estrutura de pastas com arquivos DICOM>
+            - 2/ (estudo)
+            - ...
+          - AAA2/
+            - ...
+          - AAA3/
+            - ...
+        
+        Args:
+            folder_name: Caminho até DICOM (ex: "Medicina/Doutorado IDOR/Exames/DICOM")
+            max_results: Máximo de estudos a retornar
+        
+        Returns:
+            Lista de dicionários com info dos estudos
+        """
+        try:
+            # Encontrar pasta DICOM
+            dicom_folder_id = self._find_folder_by_name(folder_name)
+            if not dicom_folder_id:
+                logger.warning(f"Pasta não encontrada: {folder_name}")
+                return []
+            
+            logger.info(f"Listando estudos DICOM de: {folder_name}")
+            
+            all_studies = []
+            
+            # Encontrar subpastas AAA (AAA1, AAA2, AAA3)
+            aaa_results = self.service.files().list(
+                q=f"'{dicom_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                spaces='drive',
+                fields='files(id, name)',
+                pageSize=100
+            ).execute()
+            
+            aaa_folders = aaa_results.get('files', [])
+            logger.debug(f"Encontradas {len(aaa_folders)} pastas AAA")
+            
+            # Para cada pasta AAA
+            for aaa_folder in aaa_folders:
+                aaa_id = aaa_folder['id']
+                
+                # Listar estudos (pastas numeradas) dentro de AAA
+                studies_results = self.service.files().list(
+                    q=f"'{aaa_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                    spaces='drive',
+                    fields='files(id, name, modifiedTime)',
+                    pageSize=100
+                ).execute()
+                
+                studies = studies_results.get('files', [])
+                
+                for study in studies:
+                    # Verificar se tem subpasta DICOM
+                    study_id = study['id']
+                    
+                    dicom_subfolder_results = self.service.files().list(
+                        q=f"'{study_id}' in parents and name='DICOM' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                        spaces='drive',
+                        fields='files(id)',
+                        pageSize=1
+                    ).execute()
+                    
+                    dicom_subfolders = dicom_subfolder_results.get('files', [])
+                    
+                    if dicom_subfolders:
+                        # É um estudo válido
+                        study_info = {
+                            'id': study_id,
+                            'name': f"{aaa_folder['name']}/{study['name']}",
+                            'aaa_name': aaa_folder['name'],
+                            'study_number': study['name'],
+                            'dicom_folder_id': dicom_subfolders[0]['id'],
+                            'modified_time': study.get('modifiedTime')
+                        }
+                        all_studies.append(study_info)
+                        
+                        if len(all_studies) >= max_results:
+                            break
+                
+                if len(all_studies) >= max_results:
+                    break
+            
+            logger.info(f"✓ {len(all_studies)} estudos DICOM encontrados")
+            return all_studies
+        
+        except HttpError as e:
+            logger.error(f"Erro ao listar estudos: {e}")
+            return []
+    
+    def download_study(
+        self,
+        study_info: Dict,
+        output_dir: Path,
+        chunk_size_mb: int = 50
+    ) -> Optional[Path]:
+        """
+        Baixar um estudo DICOM completo (estrutura de pastas)
+        
+        Args:
+            study_info: Dicionário retornado por list_dicom_studies
+            output_dir: Diretório para salvar o estudo
+            chunk_size_mb: Tamanho do chunk para download
+        
+        Returns:
+            Caminho para o diretório baixado ou None se falha
+        """
+        try:
+            dicom_folder_id = study_info['dicom_folder_id']
+            study_name = study_info['study_number']
+            
+            # Criar diretório de output
+            study_dir = output_dir / study_name
+            study_dir.mkdir(parents=True, exist_ok=True)
+            
+            logger.info(f"Baixando estudo DICOM: {study_info['name']} → {study_dir}")
+            
+            # Baixar recursivamente todos os arquivos
+            self._download_folder_recursive(dicom_folder_id, study_dir, chunk_size_mb)
+            
+            logger.info(f"✓ Estudo baixado: {study_dir}")
+            return study_dir
+        
+        except Exception as e:
+            logger.error(f"Erro ao baixar estudo: {e}")
+            return None
+    
+    def _download_folder_recursive(
+        self,
+        folder_id: str,
+        output_dir: Path,
+        chunk_size_mb: int = 50
+    ) -> int:
+        """
+        Baixar recursivamente todos os arquivos e subpastas
+        
+        Filtra arquivos não-binários (Google Docs, Sheets, etc)
+        
+        Returns:
+            Número de arquivos baixados
+        """
+        files_downloaded = 0
+        
+        # MimeTypes que NÃO devem ser baixados (Google Workspace files)
+        SKIP_MIME_TYPES = {
+            'application/vnd.google-apps.document',
+            'application/vnd.google-apps.spreadsheet',
+            'application/vnd.google-apps.presentation',
+            'application/vnd.google-apps.drawing',
+            'application/vnd.google-apps.form',
+            'application/vnd.google-apps.script',
+            'application/vnd.google-apps.site',
+            'application/vnd.google-apps.folder',  # Tratado separadamente
+        }
+        
+        try:
+            # Listar conteúdo da pasta
+            results = self.service.files().list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                spaces='drive',
+                fields='files(id, name, mimeType, size)',
+                pageSize=100
+            ).execute()
+            
+            items = results.get('files', [])
+            
+            for item in items:
+                mime_type = item.get('mimeType', '')
+                
+                if mime_type == 'application/vnd.google-apps.folder':
+                    # É uma subpasta, criar e recursivo
+                    subfolder = output_dir / item['name']
+                    subfolder.mkdir(parents=True, exist_ok=True)
+                    files_downloaded += self._download_folder_recursive(
+                        item['id'],
+                        subfolder,
+                        chunk_size_mb
+                    )
+                elif mime_type in SKIP_MIME_TYPES:
+                    # Pular arquivos Google Workspace
+                    logger.debug(f"Pulando arquivo Google Workspace: {item['name']} ({mime_type})")
+                else:
+                    # É um arquivo binário, tentar baixar
+                    try:
+                        file_path = output_dir / item['name']
+                        self.download_file(
+                            item['id'],
+                            file_path,
+                            chunk_size_mb
+                        )
+                        files_downloaded += 1
+                    except Exception as e:
+                        logger.warning(f"Erro ao baixar {item['name']}: {e}")
+                        # Continua tentando outros arquivos
+        
+        except Exception as e:
+            logger.warning(f"Erro ao descer pasta: {e}")
+        
+        return files_downloaded

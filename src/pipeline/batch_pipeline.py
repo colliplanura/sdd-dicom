@@ -160,6 +160,40 @@ class BatchPipeline:
         logger.info(f"Download concluído: {len(downloaded)}/{len(tasks)}")
         return downloaded
     
+    def _download_study_stage(self, tasks: List[ProcessingTask], study_infos: List[Dict]) -> List[Dict]:
+        """
+        Estágio 1 (alternativo): Download de estudos DICOM completos
+        
+        Uses: ThreadPoolExecutor (I/O-bound)
+        """
+        ensure_directory(self.config.TEMP_DIR)
+        
+        downloaded = []
+        
+        with ThreadPoolExecutor(max_workers=self.config.MAX_WORKERS_DOWNLOAD) as executor:
+            futures = {}
+            
+            for task, study_info in zip(tasks, study_infos):
+                output_dir = self.config.TEMP_DIR / task.file_name
+                futures[executor.submit(
+                    self._download_study,
+                    study_info,
+                    output_dir
+                )] = (task, study_info)
+            
+            for future in as_completed(futures):
+                task, study_info = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        downloaded.append(result)
+                        logger.info(f"✓ Download Study: {task.file_name}")
+                except Exception as e:
+                    logger.error(f"✗ Download Study falhou: {task.file_name} - {e}")
+        
+        logger.info(f"Download de estudos concluído: {len(downloaded)}/{len(tasks)}")
+        return downloaded
+    
     @retry_with_backoff(max_retries=3)
     def _download_file(self, file_id: str, output_path: Path) -> Optional[Dict]:
         """Download individual com retry"""
@@ -176,6 +210,28 @@ class BatchPipeline:
             }
         except Exception as e:
             logger.error(f"Download falhou: {e}")
+            raise
+    
+    @retry_with_backoff(max_retries=3)
+    def _download_study(self, study_info: Dict, output_dir: Path) -> Optional[Dict]:
+        """Download de estudo completo com retry"""
+        try:
+            study_path = self.google_drive.download_study(
+                study_info,
+                output_dir.parent,
+                chunk_size_mb=50
+            )
+            
+            if study_path:
+                return {
+                    'file_id': study_info['id'],
+                    'local_path': study_path,
+                    'status': ProcessingStatus.DOWNLOADING
+                }
+            else:
+                raise Exception("Falha no download do estudo")
+        except Exception as e:
+            logger.error(f"Download de estudo falhou: {e}")
             raise
     
     def _validate_stage(self, downloaded: List[Dict]) -> List[Dict]:
